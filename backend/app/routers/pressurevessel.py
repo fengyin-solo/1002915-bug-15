@@ -48,6 +48,15 @@ def create_entry(payload: EntryPayload) -> ActionResult:
     return ActionResult(ok=True, message="压力容器已登记", entry=entry)
 
 
+@router.put("/{entry_id}", response_model=ActionResult)
+def update_entry(entry_id: int, payload: EntryPayload) -> ActionResult:
+    """保存压力容器登记内容的修改；必填字段被清空时说明原因，不静默丢弃。"""
+    entry, message = service.update_entry(entry_id, payload.values)
+    if entry is None:
+        return ActionResult(ok=False, message=message)
+    return ActionResult(ok=True, message=message, entry=entry)
+
+
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     """对单条压力容器执行降压运行、安排检验、办理停用；不允许的动作会被拦下并说明原因。"""
