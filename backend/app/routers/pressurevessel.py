@@ -1,4 +1,4 @@
-"""压力容器接口：维护压力容器，覆盖降压运行、安排检验、办理停用等动作。"""
+"""压力容器接口：维护压力容器，覆盖超压运行、降压运行、安排检验、办理停用等动作。"""
 from __future__ import annotations
 
 from typing import Any
@@ -13,21 +13,39 @@ router = APIRouter(prefix="/api/pressurevessel", tags=["压力容器"])
 service = PressurevesselService()
 
 LIST_FIELDS = ["容器编号", "容器类别", "设计压力", "工作温度", "介质名称", "容积", "安全附件", "容器状态"]
-STATUSES = ["正常", "超压运行", "检验中", "已停用"]
+STATUSES = ["正常", "超压运行", "降压运行", "检验中", "已停用"]
 
 
 @router.get("", response_model=PageResult[dict])
 def list_entries(
     keyword: str | None = Query(default=None, description="按容器编号检索"),
-    status: str | None = Query(default=None, description="正常、超压运行、检验中、已停用"),
+    category: str | None = Query(default=None, description="按容器类别检索"),
+    design_pressure: str | None = Query(default=None, alias="设计压力", description="按设计压力检索"),
+    status: str | None = Query(default=None, description="正常、超压运行、降压运行、检验中、已停用"),
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:
-    """按容器编号与状态过滤压力容器列表；没有数据时返回空页，不报错。"""
+    """按容器编号、类别、设计压力与状态过滤压力容器列表；没有数据时返回空页，不报错。"""
+    if page < 1:
+        raise HTTPException(status_code=400, detail="页码必须从 1 开始")
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
-    items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
+    items, total = service.list_entries(
+        keyword=keyword,
+        category=category,
+        design_pressure=design_pressure,
+        status=status,
+        page=page,
+        size=size,
+    )
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出压力容器清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "pressurevessel", "total": total, "items": items}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -48,18 +66,20 @@ def create_entry(payload: EntryPayload) -> ActionResult:
     return ActionResult(ok=True, message="压力容器已登记", entry=entry)
 
 
+@router.put("/{entry_id}", response_model=ActionResult)
+def update_entry(entry_id: int, payload: EntryPayload) -> ActionResult:
+    """修改压力容器登记内容（如设计压力），保存后列表与明细读到的是同一份新值。"""
+    entry, message = service.update_entry(entry_id, payload.values)
+    if entry is None:
+        return ActionResult(ok=False, message=message)
+    return ActionResult(ok=True, message="压力容器登记内容已保存", entry=entry)
+
+
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条压力容器执行降压运行、安排检验、办理停用；不允许的动作会被拦下并说明原因。"""
+    """对单条压力容器执行审批动作；跳环节操作会被拦下，并说明卡在哪一步。"""
     action = str(payload.values.get("action") or "").strip()
     entry, message = service.run_action(entry_id, action)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出压力容器清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "pressurevessel", "total": total, "items": items}
